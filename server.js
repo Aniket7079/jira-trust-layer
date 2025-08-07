@@ -8,8 +8,8 @@ app.use(express.json());
 
 app.post('/analyze', async (req, res) => {
   try {
-    if (!process.env.GEMINI_API_KEY) {
-      console.error("❌ Missing GEMINI_API_KEY in environment");
+    if (!process.env.OPENAI_API_KEY) {
+      console.error("❌ Missing OPENAI_API_KEY in environment");
       return res.status(500).json({ error: 'Server misconfiguration' });
     }
 
@@ -21,35 +21,27 @@ app.post('/analyze', async (req, res) => {
     const { prompt } = req.body;
     console.log(`📨 Received prompt: ${prompt.substring(0, 50)}...`);
 
-    const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+    const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        contents: [
-          {
-            parts: [{ text: prompt }]
-          }
-        ]
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.2
       })
     });
 
-    if (!geminiRes.ok) {
-      const errorText = await geminiRes.text();
-      console.error("❌ Gemini API error:", errorText);
+    if (!openaiRes.ok) {
+      const errorText = await openaiRes.text();
+      console.error("❌ OpenAI API error:", errorText);
       return res.status(500).json({ error: 'AI request failed' });
     }
 
-    const data = await geminiRes.json();
-    const result = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-    if (!result) {
-      console.error("❌ Gemini response missing result:", data);
-      return res.status(500).json({ error: 'Empty response from Gemini' });
-    }
-
-    res.json({ result });
+    const data = await openaiRes.json();
+    res.json({ result: data.choices[0].message.content });
   } catch (err) {
     console.error("❌ Trust Layer error:", err);
     res.status(500).json({ error: 'AI request failed' });
@@ -57,4 +49,4 @@ app.post('/analyze', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`✅ Trust Layer (Gemini) running on port ${PORT}`));
+app.listen(PORT, () => console.log(`✅ Trust Layer running on port ${PORT}`));
