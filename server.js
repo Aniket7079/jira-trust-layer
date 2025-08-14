@@ -21,19 +21,22 @@ app.post('/analyze', async (req, res) => {
     const { prompt } = req.body;
     console.log(`📨 Received prompt: ${prompt.substring(0, 50)}...`);
 
+    // ✅ Use updated Gemini model & endpoint
     const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [
             {
+              role: "user",
               parts: [{ text: prompt }]
             }
           ],
           generationConfig: {
-            temperature: 0.2
+            temperature: 0.2,
+            maxOutputTokens: 2048
           }
         })
       }
@@ -46,7 +49,9 @@ app.post('/analyze', async (req, res) => {
     }
 
     const data = await geminiRes.json();
-    res.json({ result: data?.candidates?.[0]?.content?.parts?.[0]?.text || "" });
+    const aiText =
+      data?.candidates?.[0]?.content?.parts?.[0]?.text || "⚠ No AI response";
+    res.json({ result: aiText });
   } catch (err) {
     console.error("❌ Trust Layer error:", err);
     res.status(500).json({ error: 'AI request failed' });
