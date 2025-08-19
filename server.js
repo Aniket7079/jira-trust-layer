@@ -1,60 +1,62 @@
-import express from "express";
-import bodyParser from "body-parser";
-import fetch from "node-fetch";
-import fs from "fs";
-import { PDFDocument, rgb } from "pdf-lib";  // for PDF generation
+import express from 'express';
+import fetch from 'node-fetch';
+import dotenv from 'dotenv';
 
+dotenv.config();
 const app = express();
-app.use(bodyParser.json());
+app.use(express.json());
 
-app.post("/generate-pdf", async (req, res) => {
+app.post('/analyze', async (req, res) => {
   try {
-    const { issueKey, description } = req.body;
+    if (!process.env.GEMINI_API_KEY) {
+      console.error("❌ Missing GEMINI_API_KEY in environment");
+      return res.status(500).json({ error: 'Server misconfiguration' });
+    }
 
-    // Step 1: Call Gemini API
-    const geminiResponse = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=YOUR_GEMINI_API_KEY", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: `Generate design doc for: ${description}` }] }]
-      })
-    });
-    const geminiData = await geminiResponse.json();
-    const generatedText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || "No content";
+    const apiKeyHeader = req.headers['x-api-key'];
+    if (apiKeyHeader !== process.env.TRUST_LAYER_KEY) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
 
-    // Step 2: Generate PDF
-    const pdfDoc = await PDFDocument.create();
-    const page = pdfDoc.addPage([600, 800]);
-    const { height } = page.getSize();
-    page.drawText(generatedText, { x: 50, y: height - 100, size: 12, color: rgb(0, 0, 0) });
-    const pdfBytes = await pdfDoc.save();
+    const { prompt } = req.body;
+    console.log(`📨 Received prompt: ${prompt.substring(0, 50)}...`);
 
-    const fileName = `${issueKey}-design-doc.pdf`;
-    fs.writeFileSync(fileName, pdfBytes);
+    // ✅ Use correct Gemini model name & endpoint
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-pro:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: prompt }]
+            }
+          ],
+          generationConfig: {
+            temperature: 0.2,
+            maxOutputTokens: 2048
+          }
+        })
+      }
+    );
 
-    // Step 3: Attach PDF to Jira
-    const jiraResponse = await fetch(`https://your-domain.atlassian.net/rest/api/3/issue/${issueKey}/attachments`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Basic ${Buffer.from("YOUR_EMAIL:YOUR_API_TOKEN").toString("base64")}`,
-        "X-Atlassian-Token": "no-check"
-      },
-      body: fs.createReadStream(fileName)
-    });
+    if (!geminiRes.ok) {
+      const errorText = await geminiRes.text();
+      console.error("❌ Gemini API error:", errorText);
+      return res.status(500).json({ error: 'AI request failed' });
+    }
 
-    const jiraResult = await jiraResponse.json();
-
-    res.json({
-      message: "PDF generated and attached to Jira",
-      jiraResult
-    });
-
-  } catch (error) {
-    console.error("Error in /generate-pdf:", error);
-    res.status(500).json({ error: error.message });
+    const data = await geminiRes.json();
+    const aiText =
+      data?.candidates?.[0]?.content?.parts?.[0]?.text || "⚠ No AI response";
+    res.json({ result: aiText });
+  } catch (err) {
+    console.error("❌ Trust Layer error:", err);
+    res.status(500).json({ error: 'AI request failed' });
   }
 });
 
-app.listen(3000, () => {
-  console.log("Trust Layer running on port 3000");
-});
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`✅ Trust Layer running on port ${PORT}`));
