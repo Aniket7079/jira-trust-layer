@@ -1,74 +1,60 @@
 import express from "express";
 import bodyParser from "body-parser";
+import fetch from "node-fetch";
 import fs from "fs";
-import PDFDocument from "pdfkit";
-import axios from "axios";
-import FormData from "form-data";
-import { getLLMResponse } from "./llmClient.js";  // still using your Gemini client
+import { PDFDocument, rgb } from "pdf-lib";  // for PDF generation
 
 const app = express();
 app.use(bodyParser.json());
 
-// Jira credentials (use env vars in production)
-const JIRA_BASE_URL = "https://your-domain.atlassian.net";
-const JIRA_EMAIL = "your-email@example.com";
-const JIRA_API_TOKEN = "your-api-token";
-
-async function uploadToJira(issueKey, filePath) {
-  const form = new FormData();
-  form.append("file", fs.createReadStream(filePath));
-
+app.post("/generate-pdf", async (req, res) => {
   try {
-    const response = await axios.post(
-      `${JIRA_BASE_URL}/rest/api/3/issue/${issueKey}/attachments`,
-      form,
-      {
-        headers: {
-          ...form.getHeaders(),
-          "X-Atlassian-Token": "no-check",
-        },
-        auth: {
-          username: JIRA_EMAIL,
-          password: JIRA_API_TOKEN,
-        },
-      }
-    );
-    console.log("✅ File uploaded to Jira:", response.data);
-  } catch (error) {
-    console.error("❌ Jira upload failed:", error.response?.data || error.message);
-  }
-}
+    const { issueKey, description } = req.body;
 
-// Endpoint to generate doc + attach to Jira
-app.post("/generate-doc", async (req, res) => {
-  const { issueKey, prompt } = req.body;
+    // Step 1: Call Gemini API
+    const geminiResponse = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=YOUR_GEMINI_API_KEY", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: `Generate design doc for: ${description}` }] }]
+      })
+    });
+    const geminiData = await geminiResponse.json();
+    const generatedText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || "No content";
 
-  try {
-    // 1. Get response from Gemini
-    const designDoc = await getLLMResponse(prompt);
+    // Step 2: Generate PDF
+    const pdfDoc = await PDFDocument.create();
+    const page = pdfDoc.addPage([600, 800]);
+    const { height } = page.getSize();
+    page.drawText(generatedText, { x: 50, y: height - 100, size: 12, color: rgb(0, 0, 0) });
+    const pdfBytes = await pdfDoc.save();
 
-    // 2. Generate PDF
-    const pdfPath = `./output-${issueKey}.pdf`;
-    const doc = new PDFDocument();
-    const stream = fs.createWriteStream(pdfPath);
-    doc.pipe(stream);
+    const fileName = `${issueKey}-design-doc.pdf`;
+    fs.writeFileSync(fileName, pdfBytes);
 
-    doc.fontSize(18).text("Design Document", { align: "center" });
-    doc.moveDown();
-    doc.fontSize(12).text(designDoc);
-    doc.end();
-
-    stream.on("finish", async () => {
-      // 3. Upload to Jira
-      await uploadToJira(issueKey, pdfPath);
-
-      res.json({ success: true, message: "PDF generated and uploaded to Jira", file: pdfPath });
+    // Step 3: Attach PDF to Jira
+    const jiraResponse = await fetch(`https://your-domain.atlassian.net/rest/api/3/issue/${issueKey}/attachments`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Basic ${Buffer.from("YOUR_EMAIL:YOUR_API_TOKEN").toString("base64")}`,
+        "X-Atlassian-Token": "no-check"
+      },
+      body: fs.createReadStream(fileName)
     });
 
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, error: err.message });
+    const jiraResult = await jiraResponse.json();
+
+    res.json({
+      message: "PDF generated and attached to Jira",
+      jiraResult
+    });
+
+  } catch (error) {
+    console.error("Error in /generate-pdf:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-app.listen(3000, () => console.log("🚀 Server running on port 3000"));
+app.listen(3000, () => {
+  console.log("Trust Layer running on port 3000");
+});
