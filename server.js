@@ -1,6 +1,9 @@
 import express from 'express';
 import fetch from 'node-fetch';
 import dotenv from 'dotenv';
+import fs from 'fs';
+import PDFDocument from 'pdfkit';
+import { Document, Packer, Paragraph, TextRun } from 'docx';
 
 dotenv.config();
 const app = express();
@@ -18,10 +21,10 @@ app.post('/analyze', async (req, res) => {
       return res.status(403).json({ error: 'Unauthorized' });
     }
 
-    const { prompt } = req.body;
+    const { prompt, format } = req.body; // ✅ Added "format" for pdf/docx/text
     console.log(`📨 Received prompt: ${prompt.substring(0, 50)}...`);
 
-    // ✅ Use correct Gemini model name & endpoint
+    // ✅ Use Gemini API
     const geminiRes = await fetch(
       `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-pro:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
@@ -51,6 +54,38 @@ app.post('/analyze', async (req, res) => {
     const data = await geminiRes.json();
     const aiText =
       data?.candidates?.[0]?.content?.parts?.[0]?.text || "⚠ No AI response";
+
+    // ✅ Generate response in requested format
+    if (format === "pdf") {
+      const filePath = `./output_${Date.now()}.pdf`;
+      const doc = new PDFDocument();
+      doc.pipe(fs.createWriteStream(filePath));
+      doc.fontSize(12).text(aiText, { align: "left" });
+      doc.end();
+
+      return res.json({ message: "PDF generated", file: filePath });
+    } else if (format === "docx") {
+      const filePath = `./output_${Date.now()}.docx`;
+      const doc = new Document({
+        sections: [
+          {
+            properties: {},
+            children: [
+              new Paragraph({
+                children: [new TextRun(aiText)],
+              }),
+            ],
+          },
+        ],
+      });
+
+      const buffer = await Packer.toBuffer(doc);
+      fs.writeFileSync(filePath, buffer);
+
+      return res.json({ message: "DOCX generated", file: filePath });
+    }
+
+    // Default → return plain text
     res.json({ result: aiText });
   } catch (err) {
     console.error("❌ Trust Layer error:", err);
@@ -60,5 +95,3 @@ app.post('/analyze', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Trust Layer running on port ${PORT}`));
-
-
