@@ -1,62 +1,74 @@
-import express from 'express';
-import fetch from 'node-fetch';
-import dotenv from 'dotenv';
+import express from "express";
+import bodyParser from "body-parser";
+import fs from "fs";
+import PDFDocument from "pdfkit";
+import axios from "axios";
+import FormData from "form-data";
+import { getLLMResponse } from "./llmClient.js";  // still using your Gemini client
 
-dotenv.config();
 const app = express();
-app.use(express.json());
+app.use(bodyParser.json());
 
-app.post('/analyze', async (req, res) => {
+// Jira credentials (use env vars in production)
+const JIRA_BASE_URL = "https://your-domain.atlassian.net";
+const JIRA_EMAIL = "your-email@example.com";
+const JIRA_API_TOKEN = "your-api-token";
+
+async function uploadToJira(issueKey, filePath) {
+  const form = new FormData();
+  form.append("file", fs.createReadStream(filePath));
+
   try {
-    if (!process.env.GEMINI_API_KEY) {
-      console.error("❌ Missing GEMINI_API_KEY in environment");
-      return res.status(500).json({ error: 'Server misconfiguration' });
-    }
-
-    const apiKeyHeader = req.headers['x-api-key'];
-    if (apiKeyHeader !== process.env.TRUST_LAYER_KEY) {
-      return res.status(403).json({ error: 'Unauthorized' });
-    }
-
-    const { prompt } = req.body;
-    console.log(`📨 Received prompt: ${prompt.substring(0, 50)}...`);
-
-    // ✅ Use correct Gemini model name & endpoint
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-pro:generateContent?key=${process.env.GEMINI_API_KEY}`,
+    const response = await axios.post(
+      `${JIRA_BASE_URL}/rest/api/3/issue/${issueKey}/attachments`,
+      form,
       {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [{ text: prompt }]
-            }
-          ],
-          generationConfig: {
-            temperature: 0.2,
-            maxOutputTokens: 2048
-          }
-        })
+        headers: {
+          ...form.getHeaders(),
+          "X-Atlassian-Token": "no-check",
+        },
+        auth: {
+          username: JIRA_EMAIL,
+          password: JIRA_API_TOKEN,
+        },
       }
     );
+    console.log("✅ File uploaded to Jira:", response.data);
+  } catch (error) {
+    console.error("❌ Jira upload failed:", error.response?.data || error.message);
+  }
+}
 
-    if (!geminiRes.ok) {
-      const errorText = await geminiRes.text();
-      console.error("❌ Gemini API error:", errorText);
-      return res.status(500).json({ error: 'AI request failed' });
-    }
+// Endpoint to generate doc + attach to Jira
+app.post("/generate-doc", async (req, res) => {
+  const { issueKey, prompt } = req.body;
 
-    const data = await geminiRes.json();
-    const aiText =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text || "⚠ No AI response";
-    res.json({ result: aiText });
+  try {
+    // 1. Get response from Gemini
+    const designDoc = await getLLMResponse(prompt);
+
+    // 2. Generate PDF
+    const pdfPath = `./output-${issueKey}.pdf`;
+    const doc = new PDFDocument();
+    const stream = fs.createWriteStream(pdfPath);
+    doc.pipe(stream);
+
+    doc.fontSize(18).text("Design Document", { align: "center" });
+    doc.moveDown();
+    doc.fontSize(12).text(designDoc);
+    doc.end();
+
+    stream.on("finish", async () => {
+      // 3. Upload to Jira
+      await uploadToJira(issueKey, pdfPath);
+
+      res.json({ success: true, message: "PDF generated and uploaded to Jira", file: pdfPath });
+    });
+
   } catch (err) {
-    console.error("❌ Trust Layer error:", err);
-    res.status(500).json({ error: 'AI request failed' });
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`✅ Trust Layer running on port ${PORT}`));
+app.listen(3000, () => console.log("🚀 Server running on port 3000"));
