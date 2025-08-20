@@ -1,5 +1,6 @@
 import fs from "fs";
 import fetch from "node-fetch";
+import FormData from "form-data";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -7,7 +8,9 @@ dotenv.config();
 export async function attachPDFToJira(issueKey, filePath) {
   try {
     const jiraUrl = `${process.env.JIRA_BASE_URL}/rest/api/3/issue/${issueKey}/attachments`;
-    const fileStream = fs.createReadStream(filePath);
+
+    const form = new FormData();
+    form.append("file", fs.createReadStream(filePath));
 
     const res = await fetch(jiraUrl, {
       method: "POST",
@@ -16,8 +19,9 @@ export async function attachPDFToJira(issueKey, filePath) {
           `${process.env.JIRA_EMAIL}:${process.env.JIRA_API_TOKEN}`
         ).toString("base64")}`,
         "X-Atlassian-Token": "no-check",
+        ...form.getHeaders(), // ✅ set multipart headers
       },
-      body: fileStream,
+      body: form,
     });
 
     if (!res.ok) {
@@ -26,7 +30,9 @@ export async function attachPDFToJira(issueKey, filePath) {
       return { error: "Failed to upload to Jira", details: errText };
     }
 
-    return await res.json();
+    const json = await res.json();
+    console.log(`📤 PDF attached to Jira issue ${issueKey}`);
+    return json;
   } catch (err) {
     console.error("❌ Jira upload error:", err);
     return { error: "Exception during Jira upload" };
