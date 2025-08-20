@@ -10,7 +10,7 @@ export async function generatePDF(content, issueKey) {
   return new Promise((resolve, reject) => {
     try {
       const fileName = `AI_Analysis_${issueKey || Date.now()}.pdf`;
-      const filePath = path.join(__dirname, fileName);
+      const filePath = path.join("/tmp", fileName); // ✅ use /tmp for Render
 
       const doc = new PDFDocument();
       const stream = fs.createWriteStream(filePath);
@@ -22,7 +22,10 @@ export async function generatePDF(content, issueKey) {
 
       doc.end();
 
-      stream.on("finish", () => resolve(filePath));
+      stream.on("finish", () => {
+        console.log(`📂 PDF generated: ${filePath}`);
+        resolve(filePath);
+      });
       stream.on("error", reject);
     } catch (err) {
       reject(err);
