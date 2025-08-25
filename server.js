@@ -20,8 +20,8 @@ app.post("/analyze", async (req, res) => {
       return res.status(403).json({ error: "Unauthorized" });
     }
 
-    const { prompt, issueKey } = req.body; // ✅ Jira issueKey will come from Forge app
-    console.log(`📨 Received prompt: ${prompt.substring(0, 50)}...`);
+    const { prompt, issueKey } = req.body;
+    console.log(`📨 Received prompt: ${prompt.substring(0, 80)}...`);
 
     // 🔹 Call Gemini API
     const geminiRes = await fetch(
@@ -43,13 +43,21 @@ app.post("/analyze", async (req, res) => {
     }
 
     const data = await geminiRes.json();
-    const aiText =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text || "⚠ No AI response";
+    const aiText = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
 
-    // 🔹 Generate PDF from AI response
+    if (!aiText) {
+      console.warn("⚠ No AI response received from Gemini");
+      return res.json({ result: "⚠ No AI response", pdf: null, jira: null });
+    }
+
+    console.log("✅ AI response received");
+    console.log(aiText.substring(0, 200) + "..."); // preview first 200 chars
+
+    // 🔹 Generate PDF only if AI response is valid
     const pdfPath = await generatePDF(aiText, issueKey);
+    console.log(`📂 PDF generated: ${pdfPath}`);
 
-    // 🔹 Attach PDF back to Jira story
+    // 🔹 Attach PDF to Jira (if issueKey exists)
     let jiraResult = null;
     if (issueKey) {
       jiraResult = await attachPDFToJira(issueKey, pdfPath);
@@ -70,4 +78,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () =>
   console.log(`✅ Trust Layer running on port ${PORT}`)
 );
-
