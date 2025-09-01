@@ -36,7 +36,7 @@ app.post('/analyze', async (req, res) => {
           ],
           generationConfig: {
             temperature: 0.2,
-            maxOutputTokens: 6144
+            maxOutputTokens: 4096
           }
         })
       }
@@ -60,4 +60,5 @@ app.post('/analyze', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Trust Layer running on port ${PORT}`));
+
 
