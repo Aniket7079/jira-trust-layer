@@ -16,7 +16,7 @@ export async function attachPDFToJira(issueKey, filePath) {
 
     const form = new FormData();
     form.append("file", fs.createReadStream(filePath), {
-      filename: filePath.split("/").pop(), // ✅ Proper filename
+      filename: filePath.split("/").pop(),
     });
 
     const authHeader = `Basic ${Buffer.from(
@@ -27,8 +27,8 @@ export async function attachPDFToJira(issueKey, filePath) {
       method: "POST",
       headers: {
         Authorization: authHeader,
-        "X-Atlassian-Token": "no-check", // ✅ required
-        ...form.getHeaders(), // ✅ important for multipart
+        "X-Atlassian-Token": "no-check",
+        ...form.getHeaders(),
       },
       body: form,
     });
@@ -44,8 +44,20 @@ export async function attachPDFToJira(issueKey, filePath) {
     }
 
     const json = await res.json();
-    console.log(`📤 Successfully attached PDF to Jira issue ${issueKey}`);
-    return json;
+    const attachment = json?.[0]; // Jira returns an array
+
+    if (attachment) {
+      console.log(
+        `📤 Successfully attached PDF to Jira issue ${issueKey} → ${attachment.content}`
+      );
+      return {
+        filename: attachment.filename,
+        url: attachment.content, // ✅ direct download URL
+        size: attachment.size,
+      };
+    }
+
+    return { warning: "No attachment object returned", raw: json };
   } catch (err) {
     console.error("❌ Jira upload exception:", err.message || err);
     return { error: "Exception during Jira upload", details: err };
