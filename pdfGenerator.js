@@ -26,22 +26,45 @@ export async function generatePDF(content, issueKey = null, outputDir = "/tmp/pu
 
       doc.pipe(stream);
 
-      // Header
-      doc.fontSize(16).text("AI Analysis Report", { align: "center" });
+      // === HEADER ===
+      doc.fontSize(20).fillColor("#2c3e50").text("📊 AI Analysis Report", { align: "center", underline: true });
       doc.moveDown();
 
-      // Body (split long content into paragraphs)
-      doc.fontSize(12);
-      const paragraphs = String(content).split(/\n{2,}/g);
-      for (const para of paragraphs) {
-        doc.text(para.trim(), { align: "left" });
+      if (issueKey) {
+        doc.fontSize(12).fillColor("#555").text(`Jira Issue: ${issueKey}`, { align: "center" });
         doc.moveDown();
       }
 
-      // Footer: timestamp
-      const generatedAt = new Date().toISOString();
+      // === BODY ===
+      doc.fontSize(12).fillColor("#000");
+      const paragraphs = String(content).split(/\n{2,}/g);
+
+      for (const para of paragraphs) {
+        const trimmed = para.trim();
+        if (!trimmed) continue;
+
+        // Detect bullet points
+        if (/^(\-|\*|\d+\.)\s+/.test(trimmed)) {
+          const lines = trimmed.split(/\n/);
+          for (const line of lines) {
+            doc.text("• " + line.replace(/^(\-|\*|\d+\.)\s+/, ""), {
+              align: "left",
+              indent: 20,
+            });
+          }
+          doc.moveDown(0.5);
+        } else {
+          // Regular paragraph
+          doc.text(trimmed, { align: "left" });
+          doc.moveDown();
+        }
+      }
+
+      // === FOOTER ===
+      const generatedAt = new Date().toLocaleString();
       doc.moveDown();
-      doc.fontSize(10).text(`Generated at: ${generatedAt}`, { align: "right" });
+      doc.fontSize(10).fillColor("#555")
+        .text(`Generated at: ${generatedAt}`, { align: "right" });
 
       doc.end();
 
