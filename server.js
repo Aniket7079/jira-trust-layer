@@ -1,12 +1,19 @@
 import express from "express";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
+import path from "path";
+import fs from "fs";
 import { generatePDF } from "./pdfGenerator.js";
 import { attachPDFToJira } from "./jiraService.js";
 
 dotenv.config();
 const app = express();
 app.use(express.json());
+
+// Public PDF folder (served by Express)
+const PDF_DIR = process.env.PDF_DIR || "/tmp/public_pdfs";
+fs.mkdirSync(PDF_DIR, { recursive: true });
+app.use("/pdfs", express.static(PDF_DIR)); // public URL: /pdfs/<filename>
 
 app.post("/analyze", async (req, res) => {
   try {
@@ -21,9 +28,9 @@ app.post("/analyze", async (req, res) => {
     }
 
     const { prompt, issueKey } = req.body;
-    console.log(`📨 Received prompt: ${prompt.substring(0, 80)}...`);
+    console.log(`📨 Received prompt: ${String(prompt).substring(0, 120)}...`);
 
-    // 🔹 Call Gemini API
+    // Call Gemini API
     const geminiRes = await fetch(
       `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-pro:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
@@ -31,7 +38,7 @@ app.post("/analyze", async (req, res) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.2, maxOutputTokens: 4096 }, // ⬆ Allow longer output
+          generationConfig: { temperature: 0.2, maxOutputTokens: 4096 },
         }),
       }
     );
@@ -43,37 +50,56 @@ app.post("/analyze", async (req, res) => {
     }
 
     const data = await geminiRes.json();
-    console.log("🔎 Gemini Raw Response:", JSON.stringify(data, null, 2));
+    console.log("🔎 Gemini Raw Response (truncated):", JSON.stringify(data?.candidates?.[0], null, 2).slice(0, 2000));
 
-    // 🔹 Extract AI response safely
+    // Extract AI text safely
     let aiText =
       data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-      data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("\n") ||
+      (Array.isArray(data?.candidates?.[0]?.content?.parts)
+        ? data.candidates[0].content.parts.map((p) => p.text).join("\n")
+        : "") ||
       "";
 
     if (!aiText.trim()) {
-      console.warn("⚠ No AI response received from Gemini");
+      console.warn("⚠ No AI response received from Gemini — creating fallback content.");
       aiText = "⚠ Gemini returned no usable response.";
     }
 
-    console.log("✅ AI response received");
-    console.log(aiText.substring(0, 200) + "..."); // preview first 200 chars
+    console.log("✅ AI response received (length):", aiText.length);
 
-    // 🔹 Generate PDF even if AI response is fallback
-    const pdfPath = await generatePDF(aiText, issueKey);
-    console.log(`📂 PDF generated: ${pdfPath}`);
+    // Generate PDF into public folder
+    const { filePath, filename } = await generatePDF(aiText, issueKey, PDF_DIR);
+    console.log(`📂 PDF generated at path: ${filePath}`);
 
-    // 🔹 Attach PDF to Jira (if issueKey exists)
-    let jiraResult = null;
-    if (issueKey) {
-      jiraResult = await attachPDFToJira(issueKey, pdfPath);
+    // Build public URL for download
+    const serverUrl = process.env.SERVER_URL;
+    if (!serverUrl) {
+      console.warn("⚠ SERVER_URL not set. Set SERVER_URL env var to enable public download links.");
     }
+    const pdfPublicUrl = serverUrl ? `${serverUrl.replace(/\/$/,"")}/pdfs/${encodeURIComponent(filename)}` : null;
 
+    // Return AI text + downloadable link immediately
     res.json({
       result: aiText,
-      pdf: pdfPath,
-      jira: jiraResult || "⚠ Jira upload skipped (no issueKey)",
+      pdfUrl: pdfPublicUrl,
+      pdfLocalPath: filePath, // useful for debugging (ephemeral)
+      jira: "Attachment will be processed in background (if issueKey provided).",
     });
+
+    // Background: attach file to Jira (don't block response)
+    if (issueKey) {
+      (async () => {
+        try {
+          console.log(`🔔 Starting background Jira attach for ${issueKey} -> ${filename}`);
+          const jiraResult = await attachPDFToJira(issueKey, filePath);
+          console.log("📤 Jira attach result:", jiraResult);
+        } catch (attachErr) {
+          console.error("❌ Background Jira attach failed:", attachErr);
+        }
+      })();
+    } else {
+      console.log("⚠ No issueKey provided — skipping Jira attach.");
+    }
   } catch (err) {
     console.error("❌ Trust Layer error:", err);
     res.status(500).json({ error: "AI request failed" });
@@ -81,6 +107,4 @@ app.post("/analyze", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () =>
-  console.log(`✅ Trust Layer running on port ${PORT}`)
-);
+app.listen(PORT, () => console.log(`✅ Trust Layer running on port ${PORT}`));
