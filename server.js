@@ -72,21 +72,24 @@ app.post("/analyze", async (req, res) => {
     console.log(`📂 PDF generated at path: ${filePath}`);
 
     // Build public URL for download
-    const serverUrl = process.env.SERVER_URL;
-    if (!serverUrl) {
-      console.warn("⚠ SERVER_URL not set. Set SERVER_URL env var to enable public download links.");
+    let baseUrl = process.env.SERVER_URL;
+    if (!baseUrl) {
+      // fallback: use the incoming request host
+      baseUrl = `${req.protocol}://${req.get("host")}`;
+      console.warn(`⚠ SERVER_URL not set. Falling back to request host: ${baseUrl}`);
     }
-    const pdfPublicUrl = serverUrl ? `${serverUrl.replace(/\/$/,"")}/pdfs/${encodeURIComponent(filename)}` : null;
+    const pdfPublicUrl = `${baseUrl.replace(/\/$/, "")}/pdfs/${encodeURIComponent(filename)}`;
 
     // Return AI text + downloadable link immediately
     res.json({
       result: aiText,
       pdfUrl: pdfPublicUrl,
-      pdfLocalPath: filePath, // useful for debugging (ephemeral)
-      jira: "Attachment will be processed in background (if issueKey provided).",
+      jira: issueKey
+        ? `Attachment is being processed for Jira issue ${issueKey}.`
+        : "No issueKey provided — Jira attach skipped.",
     });
 
-    // Background: attach file to Jira (don't block response)
+    // Background: attach file to Jira (don’t block response)
     if (issueKey) {
       (async () => {
         try {
@@ -97,8 +100,6 @@ app.post("/analyze", async (req, res) => {
           console.error("❌ Background Jira attach failed:", attachErr);
         }
       })();
-    } else {
-      console.log("⚠ No issueKey provided — skipping Jira attach.");
     }
   } catch (err) {
     console.error("❌ Trust Layer error:", err);
