@@ -69,7 +69,6 @@ app.post("/analyze", async (req, res) => {
 
     // Generate PDF into public folder
     const { filePath, filename } = await generatePDF(aiText, issueKey, PDF_DIR);
-    console.log(`🌐 PDF Public URL: ${pdfPublicUrl}`);
     console.log(`📂 PDF generated at path: ${filePath}`);
 
     // Build public URL for download
@@ -80,6 +79,7 @@ app.post("/analyze", async (req, res) => {
       console.warn(`⚠ SERVER_URL not set. Falling back to request host: ${baseUrl}`);
     }
     const pdfPublicUrl = `${baseUrl.replace(/\/$/, "")}/pdfs/${encodeURIComponent(filename)}`;
+    console.log(`🌐 PDF Public URL: ${pdfPublicUrl}`);
 
     // Return AI text + downloadable link immediately
     res.json({
@@ -110,4 +110,5 @@ app.post("/analyze", async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Trust Layer running on port ${PORT}`));
+
 
