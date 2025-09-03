@@ -50,7 +50,7 @@ app.post("/analyze", async (req, res) => {
     }
 
     const data = await geminiRes.json();
-    console.log("🔎 Gemini Raw Response (truncated):", JSON.stringify(data?.candidates?.[0], null, 2).slice(0, 2000));
+    console.log("🔎 Gemini Raw Response (truncated):", JSON.stringify(data?.candidates?.[0], null, 2).slice(0, 10000));
 
     // Extract AI text safely
     let aiText =
@@ -110,6 +110,7 @@ app.post("/analyze", async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Trust Layer running on port ${PORT}`));
+
 
 
 
