@@ -13,7 +13,7 @@ app.use(express.json());
 // Public PDF folder (served by Express)
 const PDF_DIR = process.env.PDF_DIR || "/tmp/public_pdfs";
 fs.mkdirSync(PDF_DIR, { recursive: true });
-app.use("/pdfs", express.static(PDF_DIR)); // public URL: /pdfs/<filename>
+app.use("/pdfs", express.static(PDF_DIR)); 
 
 app.post("/analyze", async (req, res) => {
   try {
@@ -110,5 +110,6 @@ app.post("/analyze", async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Trust Layer running on port ${PORT}`));
+
 
 
