@@ -13,7 +13,36 @@ app.use(express.json());
 // Public PDF folder (served by Express)
 const PDF_DIR = process.env.PDF_DIR || "/tmp/public_pdfs";
 fs.mkdirSync(PDF_DIR, { recursive: true });
-app.use("/pdfs", express.static(PDF_DIR)); 
+app.use("/pdfs", express.static(PDF_DIR)); // public URL: /pdfs/<filename>
+
+// Helper → Add Jira comment with PDF link
+async function addCommentToJira(issueKey, comment) {
+  try {
+    const jiraUrl = `${process.env.JIRA_BASE_URL}/rest/api/3/issue/${issueKey}/comment`;
+
+    const authHeader = `Basic ${Buffer.from(
+      `${process.env.JIRA_EMAIL}:${process.env.JIRA_API_TOKEN}`
+    ).toString("base64")}`;
+
+    const res = await fetch(jiraUrl, {
+      method: "POST",
+      headers: {
+        "Authorization": authHeader,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ body: comment }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error(`❌ Failed to add Jira comment: ${res.status}`, errText);
+    } else {
+      console.log(`💬 Comment added to Jira issue ${issueKey}`);
+    }
+  } catch (err) {
+    console.error("❌ Jira comment exception:", err.message || err);
+  }
+}
 
 app.post("/analyze", async (req, res) => {
   try {
@@ -50,9 +79,6 @@ app.post("/analyze", async (req, res) => {
     }
 
     const data = await geminiRes.json();
-    console.log("🔎 Gemini Raw Response (truncated):", JSON.stringify(data?.candidates?.[0], null, 2).slice(0, 10000));
-
-    // Extract AI text safely
     let aiText =
       data?.candidates?.[0]?.content?.parts?.[0]?.text ||
       (Array.isArray(data?.candidates?.[0]?.content?.parts)
@@ -74,14 +100,13 @@ app.post("/analyze", async (req, res) => {
     // Build public URL for download
     let baseUrl = process.env.SERVER_URL;
     if (!baseUrl) {
-      // fallback: use the incoming request host
       baseUrl = `${req.protocol}://${req.get("host")}`;
       console.warn(`⚠ SERVER_URL not set. Falling back to request host: ${baseUrl}`);
     }
     const pdfPublicUrl = `${baseUrl.replace(/\/$/, "")}/pdfs/${encodeURIComponent(filename)}`;
     console.log(`🌐 PDF Public URL: ${pdfPublicUrl}`);
 
-    // Return AI text + downloadable link immediately
+    // Send immediate response
     res.json({
       result: aiText,
       pdfUrl: pdfPublicUrl,
@@ -90,15 +115,26 @@ app.post("/analyze", async (req, res) => {
         : "No issueKey provided — Jira attach skipped.",
     });
 
-    // Background: attach file to Jira (don’t block response)
+    // Background: Attach to Jira
     if (issueKey) {
       (async () => {
         try {
-          console.log(`🔔 Starting background Jira attach for ${issueKey} -> ${filename}`);
+          console.log(`🔔 Attaching PDF to Jira issue ${issueKey}`);
           const jiraResult = await attachPDFToJira(issueKey, filePath);
-          console.log("📤 Jira attach result:", jiraResult);
+
+          if (jiraResult?.url) {
+            console.log(`📤 Jira attachment success: ${jiraResult.url}`);
+          } else {
+            console.error("⚠ Jira attach failed or returned no URL", jiraResult);
+          }
+
+          // Always add comment with public URL
+          await addCommentToJira(
+            issueKey,
+            `📎 AI-generated analysis attached.\n\n🔗 Public PDF: ${pdfPublicUrl}`
+          );
         } catch (attachErr) {
-          console.error("❌ Background Jira attach failed:", attachErr);
+          console.error("❌ Jira attach exception:", attachErr);
         }
       })();
     }
@@ -110,7 +146,3 @@ app.post("/analyze", async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Trust Layer running on port ${PORT}`));
-
-
-
-
