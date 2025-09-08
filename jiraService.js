@@ -14,7 +14,6 @@ function sleep(ms) {
 }
 
 export async function attachPDFToJira(issueKey, filePath, options = {}) {
-  // options: { pdfPublicUrl: string, addComment: boolean }
   try {
     if (!fs.existsSync(filePath)) {
       console.error("❌ File not found:", filePath);
@@ -22,10 +21,8 @@ export async function attachPDFToJira(issueKey, filePath, options = {}) {
     }
 
     const jiraUrl = `${process.env.JIRA_BASE_URL.replace(/\/$/, "")}/rest/api/3/issue/${issueKey}/attachments`;
-
     const filename = filePath.split("/").pop();
 
-    // Build form
     const form = new FormData();
     form.append("file", fs.createReadStream(filePath), { filename });
 
@@ -33,7 +30,6 @@ export async function attachPDFToJira(issueKey, filePath, options = {}) {
       `${process.env.JIRA_EMAIL}:${process.env.JIRA_API_TOKEN}`
     ).toString("base64")}`;
 
-    // Retry loop for transient errors
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         const res = await axios.post(jiraUrl, form, {
@@ -47,60 +43,54 @@ export async function attachPDFToJira(issueKey, filePath, options = {}) {
           timeout: 30000,
         });
 
-        // success
-        const json = res.data;
-        const attachment = Array.isArray(json) ? json[0] : json?.values?.[0] || (json && json[0]);
-
         console.log(`📤 Jira attach HTTP ${res.status} ${res.statusText}`);
+        const json = res.data;
+
+        // Jira returns an array of attachments
+        const attachment = Array.isArray(json) ? json[0] : json;
+
         if (attachment) {
-          console.log(`📤 Successfully attached: ${attachment.filename} -> ${attachment.content}`);
-          const result = {
+          console.log(`📎 Attached file: ${attachment.filename} -> ${attachment.content}`);
+
+          // Always add Jira comment with either Jira link or your public link
+          if (options.pdfPublicUrl) {
+            await addCommentToIssue(
+              issueKey,
+              `📎 AI-generated analysis attached.\n\n🔗 Public PDF: ${options.pdfPublicUrl}\n\n📂 Jira-hosted copy: ${attachment.content}`
+            );
+          }
+
+          return {
             filename: attachment.filename,
-            url: attachment.content,
+            jiraUrl: attachment.content, // Jira’s permanent link
             size: attachment.size,
             raw: json,
           };
-
-          // Optionally add a comment with public PDF link (if provided)
-          if (options.pdfPublicUrl && options.addComment) {
-            try {
-              await addCommentToIssue(issueKey, `AI PDF: ${options.pdfPublicUrl}`);
-            } catch (commentErr) {
-              console.warn("⚠ Failed to add Jira comment with public link:", commentErr.message || commentErr);
-            }
-          }
-
-          return result;
-        } else {
-          console.warn("⚠ Jira attach succeeded but attachment object missing in response", json);
-          return { raw: json };
         }
+
+        return { error: "No attachment object in response", raw: json };
       } catch (err) {
         const status = err?.response?.status;
         const body = err?.response?.data || err?.message || String(err);
-        console.error(`❌ Jira attach attempt ${attempt + 1} failed. status=${status} body=`, body);
+        console.error(`❌ Jira attach attempt ${attempt + 1} failed. status=${status}`, body);
 
-        // If quota/forbidden/unauth -> don't retry
         if (status && [400, 401, 403, 413, 415].includes(status)) {
           return { error: "non-retryable", status, details: body };
         }
 
-        // last attempt -> give up
         if (attempt === MAX_RETRIES) {
           return { error: "failed after retries", status, details: body };
         }
 
-        // else wait and retry
         await sleep(RETRY_DELAY_MS * (attempt + 1));
       }
-    } // end retry loop
+    }
   } catch (err) {
     console.error("❌ Jira upload exception:", err?.message || err);
     return { error: "Exception during Jira upload", details: err?.message || err };
   }
 }
 
-// helper to add a comment to the issue
 async function addCommentToIssue(issueKey, comment) {
   const url = `${process.env.JIRA_BASE_URL.replace(/\/$/, "")}/rest/api/3/issue/${issueKey}/comment`;
   const authHeader = `Basic ${Buffer.from(
@@ -118,5 +108,6 @@ async function addCommentToIssue(issueKey, comment) {
       timeout: 15000,
     }
   );
+
   return res.data;
 }
