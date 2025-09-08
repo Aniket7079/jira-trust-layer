@@ -27,7 +27,7 @@ export async function generatePDF(content, issueKey = null, outputDir = "/tmp/pu
       doc.pipe(stream);
 
       // === HEADER ===
-      doc.fontSize(20).fillColor("#2c3e50").text("📊 AI Analysis Report", { align: "center", underline: true });
+      doc.fontSize(20).fillColor("#2c3e50").text("AI Analysis Report", { align: "center", underline: true });
       doc.moveDown();
 
       if (issueKey) {
