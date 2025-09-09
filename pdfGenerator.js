@@ -5,19 +5,23 @@ import PDFDocument from "pdfkit";
 /**
  * generatePDF(content, issueKey, outputDir)
  * - content: string to put in the PDF
- * - issueKey: will be used in filename (if provided)
+ * - issueKey: MUST be provided (no fallback)
  * - outputDir: directory to write the PDF (must exist or will be created)
  *
  * Returns: { filePath, filename }
  */
-export async function generatePDF(content, issueKey = null, outputDir = "/tmp/public_pdfs") {
+export async function generatePDF(content, issueKey, outputDir = "/tmp/public_pdfs") {
   return new Promise((resolve, reject) => {
     try {
+      if (!issueKey) {
+        throw new Error("❌ generatePDF called without a valid issueKey!");
+      }
+
       // Ensure output directory exists
       fs.mkdirSync(outputDir, { recursive: true });
 
       // Clean filename (only allow safe chars)
-      const safeKey = (issueKey || Date.now()).toString().replace(/[^a-zA-Z0-9_\-]/g, "_");
+      const safeKey = issueKey.toString().replace(/[^a-zA-Z0-9_\-]/g, "_");
       const filename = `AI_Analysis_${safeKey}.pdf`;
       const filePath = path.join(outputDir, filename);
 
@@ -30,10 +34,8 @@ export async function generatePDF(content, issueKey = null, outputDir = "/tmp/pu
       doc.fontSize(20).fillColor("#2c3e50").text("AI Analysis Report", { align: "center", underline: true });
       doc.moveDown();
 
-      if (issueKey) {
-        doc.fontSize(12).fillColor("#555").text(`Jira Issue: ${issueKey}`, { align: "center" });
-        doc.moveDown();
-      }
+      doc.fontSize(12).fillColor("#555").text(`Jira Issue: ${issueKey}`, { align: "center" });
+      doc.moveDown();
 
       // === BODY ===
       doc.fontSize(12).fillColor("#000");
