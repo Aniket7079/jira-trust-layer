@@ -65,7 +65,7 @@ app.post("/analyze", async (req, res) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.2, maxOutputTokens: 4096, maxContinues: 3 },
+          generationConfig: { temperature: 0.2, maxOutputTokens: 8192, maxContinues: 3 },
         }),
       }
     );
@@ -144,6 +144,7 @@ app.post("/analyze", async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Trust Layer running on port ${PORT}`));
+
 
 
 
